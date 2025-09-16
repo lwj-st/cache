@@ -66035,7 +66035,8 @@ var Inputs;
     Inputs["UploadChunkSize"] = "upload-chunk-size";
     Inputs["EnableCrossOsArchive"] = "enableCrossOsArchive";
     Inputs["FailOnCacheMiss"] = "fail-on-cache-miss";
-    Inputs["LookupOnly"] = "lookup-only"; // Input for cache, restore action
+    Inputs["LookupOnly"] = "lookup-only";
+    Inputs["CiPath"] = "ci_path"; // Input for save action
 })(Inputs = exports.Inputs || (exports.Inputs = {}));
 var Outputs;
 (function (Outputs) {
@@ -66105,6 +66106,8 @@ const stateProvider_1 = __nccwpck_require__(2879);
 const utils = __importStar(__nccwpck_require__(8270));
 function restoreImpl(stateProvider, earlyExit) {
     return __awaiter(this, void 0, void 0, function* () {
+        let originalCwd;
+        let targetCwd;
         try {
             if (!utils.isCacheFeatureAvailable()) {
                 core.setOutput(constants_1.Outputs.CacheHit, "false");
@@ -66115,16 +66118,35 @@ function restoreImpl(stateProvider, earlyExit) {
                 utils.logWarning(`Event Validation Error: The event type ${process.env[constants_1.Events.Key]} is not supported because it's not tied to a branch or tag ref.`);
                 return;
             }
+            // Check if ci_path is provided and change directory if needed
+            const ciPath = core.getInput(constants_1.Inputs.CiPath);
+            if (ciPath) {
+                originalCwd = process.cwd();
+                targetCwd = ciPath; // 记录目标目录
+                try {
+                    process.chdir(ciPath);
+                    core.info(`Changed directory to: ${ciPath}`);
+                    // 设置环境变量，让 GitHub Actions 知道新的工作目录
+                    process.env.GITHUB_WORKSPACE = ciPath;
+                    core.info(`Set GITHUB_WORKSPACE to: ${ciPath}`);
+                }
+                catch (error) {
+                    utils.logWarning(`Failed to change directory to ${ciPath}: ${error.message}`);
+                    return;
+                }
+            }
             const primaryKey = core.getInput(constants_1.Inputs.Key, { required: true });
             stateProvider.setState(constants_1.State.CachePrimaryKey, primaryKey);
             const restoreKeys = utils.getInputAsArray(constants_1.Inputs.RestoreKeys);
             const cachePaths = utils.getInputAsArray(constants_1.Inputs.Path, {
                 required: true
             });
+            // 不要转换路径为绝对路径，让 GitHub Actions 在正确目录下处理
             const enableCrossOsArchive = utils.getInputAsBool(constants_1.Inputs.EnableCrossOsArchive);
             const failOnCacheMiss = utils.getInputAsBool(constants_1.Inputs.FailOnCacheMiss);
             const lookupOnly = utils.getInputAsBool(constants_1.Inputs.LookupOnly);
-            const cacheKey = yield cache.restoreCache(cachePaths, primaryKey, restoreKeys, { lookupOnly: lookupOnly }, enableCrossOsArchive);
+            const cacheKey = yield cache.restoreCache(cachePaths, // 使用原始相对路径
+            primaryKey, restoreKeys, { lookupOnly: lookupOnly }, enableCrossOsArchive);
             if (!cacheKey) {
                 // `cache-hit` is intentionally not set to `false` here to preserve existing behavior
                 // See https://github.com/actions/cache/issues/1466
@@ -66153,6 +66175,29 @@ function restoreImpl(stateProvider, earlyExit) {
             core.setFailed(error.message);
             if (earlyExit) {
                 process.exit(1);
+            }
+        }
+        finally {
+            // Restore to ci_path directory if it was specified, otherwise restore to original directory
+            if (targetCwd) {
+                // 如果指定了 ci_path，恢复到 ci_path 目录
+                try {
+                    process.chdir(targetCwd);
+                    core.info(`Restored directory to: ${targetCwd}`);
+                }
+                catch (error) {
+                    utils.logWarning(`Failed to restore directory to ${targetCwd}: ${error.message}`);
+                }
+            }
+            else if (originalCwd) {
+                // 如果没有指定 ci_path 但改变了目录，恢复到原始目录
+                try {
+                    process.chdir(originalCwd);
+                    core.info(`Restored directory to: ${originalCwd}`);
+                }
+                catch (error) {
+                    utils.logWarning(`Failed to restore directory to ${originalCwd}: ${error.message}`);
+                }
             }
         }
     });

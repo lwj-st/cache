@@ -13,6 +13,9 @@ export async function restoreImpl(
     stateProvider: IStateProvider,
     earlyExit?: boolean | undefined
 ): Promise<string | undefined> {
+    let originalCwd: string | undefined;
+    let targetCwd: string | undefined;
+    
     try {
         if (!utils.isCacheFeatureAvailable()) {
             core.setOutput(Outputs.CacheHit, "false");
@@ -29,6 +32,24 @@ export async function restoreImpl(
             return;
         }
 
+        // Check if ci_path is provided and change directory if needed
+        const ciPath = core.getInput(Inputs.CiPath);
+        if (ciPath) {
+            originalCwd = process.cwd();
+            targetCwd = ciPath;  // 记录目标目录
+            try {
+                process.chdir(ciPath);
+                core.info(`Changed directory to: ${ciPath}`);
+                
+                // 设置环境变量，让 GitHub Actions 知道新的工作目录
+                process.env.GITHUB_WORKSPACE = ciPath;
+                core.info(`Set GITHUB_WORKSPACE to: ${ciPath}`);
+            } catch (error) {
+                utils.logWarning(`Failed to change directory to ${ciPath}: ${(error as Error).message}`);
+                return;
+            }
+        }
+
         const primaryKey = core.getInput(Inputs.Key, { required: true });
         stateProvider.setState(State.CachePrimaryKey, primaryKey);
 
@@ -36,6 +57,8 @@ export async function restoreImpl(
         const cachePaths = utils.getInputAsArray(Inputs.Path, {
             required: true
         });
+
+        // 不要转换路径为绝对路径，让 GitHub Actions 在正确目录下处理
         const enableCrossOsArchive = utils.getInputAsBool(
             Inputs.EnableCrossOsArchive
         );
@@ -43,7 +66,7 @@ export async function restoreImpl(
         const lookupOnly = utils.getInputAsBool(Inputs.LookupOnly);
 
         const cacheKey = await cache.restoreCache(
-            cachePaths,
+            cachePaths,  // 使用原始相对路径
             primaryKey,
             restoreKeys,
             { lookupOnly: lookupOnly },
@@ -88,6 +111,25 @@ export async function restoreImpl(
         core.setFailed((error as Error).message);
         if (earlyExit) {
             process.exit(1);
+        }
+    } finally {
+        // Restore to ci_path directory if it was specified, otherwise restore to original directory
+        if (targetCwd) {
+            // 如果指定了 ci_path，恢复到 ci_path 目录
+            try {
+                process.chdir(targetCwd);
+                core.info(`Restored directory to: ${targetCwd}`);
+            } catch (error) {
+                utils.logWarning(`Failed to restore directory to ${targetCwd}: ${(error as Error).message}`);
+            }
+        } else if (originalCwd) {
+            // 如果没有指定 ci_path 但改变了目录，恢复到原始目录
+            try {
+                process.chdir(originalCwd);
+                core.info(`Restored directory to: ${originalCwd}`);
+            } catch (error) {
+                utils.logWarning(`Failed to restore directory to ${originalCwd}: ${(error as Error).message}`);
+            }
         }
     }
 }

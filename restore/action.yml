@@ -23,6 +23,9 @@ inputs:
     description: 'Check if a cache entry exists for the given input(s) (key, restore-keys) without downloading the cache'
     default: 'false'
     required: false
+  ci_path:
+    description: 'Optional path to change directory before restoring cache. If specified, the action will change to this directory before restoring cache'
+    required: false
 outputs:
   cache-hit:
     description: 'A boolean value to indicate an exact match was found for the primary key'
